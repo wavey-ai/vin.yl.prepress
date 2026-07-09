@@ -1,0 +1,25 @@
+[package]
+name = "record-prepress"
+version = "0.1.0"
+edition = "2021"
+description = "WASM-compatible plant-ready prepress planning and export core for Bitneedle record plant artwork."
+repository = "https://github.com/wavey-ai/bitneedle"
+license = "SEE LICENSE IN LICENSE"
+
+[features]
+default = []
+native-cli = ["anyhow"]
+
+[[bin]]
+name = "record-prepress"
+path = "src/main.rs"
+required-features = ["native-cli"]
+
+[dependencies]
+anyhow = { version = "1", optional = true }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+moxcms = { version = "0.8.1", default-features = false, features = ["lut"] }
+record-plant = { path = "../vin.yl.plant" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

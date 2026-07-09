@@ -1,0 +1,12 @@
+__pycache__
+.wrangler
+.DS_Store
+.secrets
+node_modules/
+.venv*/
+target/
+dist/
+.cache/
+.cache-local/
+.tmp-local/
+/tmp/
