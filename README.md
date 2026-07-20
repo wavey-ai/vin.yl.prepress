@@ -26,9 +26,9 @@ cargo run -p record-prepress --features native-cli -- preflight --pdf plant-read
 
 The current exporter is intentionally strict: `target.iccProfile` and matching
 ICC bytes are required for CMYK plant-ready export. Source artwork is normalized
-to sRGB from embedded RGB ICC profiles when present, then the final raster is
-converted to the target CMYK ICC profile with `moxcms` and embedded as the PDF
-output intent. If a plant publishes a specific profile, pass those ICC bytes to
+to sRGB from its embedded RGB ICC profile, when present. Then, `moxcms` converts
+the final raster to the target CMYK ICC profile. The exporter embeds this
+profile as the PDF output intent. If a plant publishes a specific profile, pass those ICC bytes to
 the exporter. If not, choose a house CMYK profile explicitly rather than relying
 on browser RGB canvas output.
 
@@ -43,5 +43,5 @@ logos are intentionally outside a safety area.
 
 The native `preflight` helper performs local PDF structure checks and runs
 Ghostscript when installed. If `veraPDF` is installed it is also used as the
-external PDF/X conformance gate; otherwise the report records that PDF/X
+external PDF/X conformance gate. Otherwise the report records that PDF/X
 conformance is not externally proven.
