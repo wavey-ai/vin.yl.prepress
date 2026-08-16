@@ -3,7 +3,7 @@ name = "record-prepress"
 version = "0.1.0"
 edition = "2021"
 description = "WASM-compatible plant-ready prepress planning and export core for Bitneedle record plant artwork."
-repository = "https://github.com/wavey-ai/bitneedle"
+repository = "https://github.com/wavey-ai/vin.yl.prepress"
 license = "MIT"
 
 [features]

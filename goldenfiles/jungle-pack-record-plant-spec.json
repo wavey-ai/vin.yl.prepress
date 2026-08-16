@@ -1,0 +1,204 @@
+{
+  "artifacts": [
+    {
+      "containsArtwork": true,
+      "path": "proof.svg",
+      "role": "human-proof",
+      "visibleGuides": true
+    },
+    {
+      "containsArtwork": true,
+      "goldenCommitted": false,
+      "path": "plant-ready.pdf",
+      "role": "production",
+      "validation": "validated in memory by Rust test",
+      "visibleGuides": false
+    },
+    {
+      "path": "record-plant-spec.json",
+      "role": "machine-readable-spec",
+      "visibleGuides": false
+    },
+    {
+      "path": "preflight.md",
+      "role": "human-readable-preflight",
+      "visibleGuides": false
+    },
+    {
+      "path": "README-for-plant.md",
+      "role": "plant-instructions",
+      "visibleGuides": false
+    }
+  ],
+  "bleedAreas": [
+    {
+      "heightMm": 106.0,
+      "shape": "circle",
+      "widthMm": 106.0,
+      "xMm": 10.0,
+      "yMm": 10.0
+    },
+    {
+      "heightMm": 106.0,
+      "shape": "circle",
+      "widthMm": 106.0,
+      "xMm": 10.0,
+      "yMm": 116.0
+    }
+  ],
+  "color": {
+    "iccProfile": "supplier-target.icc",
+    "mode": "cmyk",
+    "outputConditionIdentifier": "FOGRA39",
+    "pdfStandard": "pdf/x-4",
+    "sourceRgbProfile": "srgb"
+  },
+  "cutouts": [],
+  "packType": "bitneedle-record-plant-manufacturing-pack",
+  "page": {
+    "heightMm": 232.0,
+    "heightPx": 2741,
+    "targetDpi": 300,
+    "widthMm": 126.0,
+    "widthPx": 1489
+  },
+  "preflight": {
+    "checks": [
+      {
+        "detail": "2 artwork slot(s) mapped to print placement(s).",
+        "id": "slot-count",
+        "status": "pass",
+        "summary": "Artwork slot count matches template placements"
+      },
+      {
+        "detail": "Lowest effective resolution is 300.5 ppi for a 300 ppi target.",
+        "id": "image-resolution",
+        "status": "pass",
+        "summary": "Artwork resolution meets target DPI"
+      },
+      {
+        "detail": "sRGB raster converted to target CMYK ICC with moxcms",
+        "id": "color-conversion",
+        "status": "pass",
+        "summary": "Final raster is converted through the exporter color pipeline"
+      },
+      {
+        "detail": "Embedded 4 channel ICCBased image space and OutputIntent FOGRA39.",
+        "id": "output-intent",
+        "status": "pass",
+        "summary": "PDF embeds an ICC output intent"
+      },
+      {
+        "detail": "Emitted file starts with %PDF-1.7.",
+        "id": "pdf-header",
+        "status": "pass",
+        "summary": "PDF header is present"
+      },
+      {
+        "detail": "MediaBox, TrimBox, and BleedBox are 126.000 x 232.000 mm.",
+        "id": "pdf-boxes",
+        "status": "pass",
+        "summary": "PDF boxes match template document size"
+      },
+      {
+        "detail": "Embedded raster is 1489 x 2741 px at 300 ppi.",
+        "id": "image-size",
+        "status": "pass",
+        "summary": "Embedded raster dimensions match target DPI"
+      },
+      {
+        "detail": "Emitted PDF declares pdf/x-4 in Info and XMP metadata.",
+        "id": "pdf-x-marker",
+        "status": "pass",
+        "summary": "PDF/X markers and XMP metadata are present"
+      },
+      {
+        "detail": "The emitted PDF object text contains no DeviceRGB, CalRGB, or Lab color spaces.",
+        "id": "no-rgb-objects",
+        "status": "pass",
+        "summary": "No RGB PDF color objects are present"
+      },
+      {
+        "detail": "The final PDF contains one raster image XObject and no source guide object identifiers.",
+        "id": "template-guides",
+        "status": "pass",
+        "summary": "Template guides are not written to the final PDF layer"
+      },
+      {
+        "detail": "Template contains no explicit no-print cutout guides.",
+        "id": "cutouts",
+        "status": "pass",
+        "summary": "Cutout guide areas are masked in the final raster"
+      },
+      {
+        "detail": "2 safety area(s) were confirmed clear before plant-ready export.",
+        "id": "safety-area",
+        "status": "pass",
+        "summary": "Safety clearance was confirmed before export"
+      }
+    ]
+  },
+  "safetyAreas": [
+    {
+      "heightMm": 94.6,
+      "shape": "circle",
+      "widthMm": 94.6,
+      "xMm": 15.700000000000003,
+      "yMm": 15.700000000000003
+    },
+    {
+      "heightMm": 94.6,
+      "shape": "circle",
+      "widthMm": 94.6,
+      "xMm": 15.700000000000003,
+      "yMm": 121.7
+    }
+  ],
+  "slots": [
+    {
+      "artworkPath": "jungle-pack-artwork-source.png",
+      "effectivePpi": 300.4867924528302,
+      "placement": {
+        "heightMm": 106.0,
+        "shape": "circle",
+        "widthMm": 106.0,
+        "xMm": 10.0,
+        "yMm": 10.0
+      },
+      "placementIndex": 0,
+      "slotId": "side_a"
+    },
+    {
+      "artworkPath": "jungle-pack-artwork-source.png",
+      "effectivePpi": 300.4867924528302,
+      "placement": {
+        "heightMm": 106.0,
+        "shape": "circle",
+        "widthMm": 106.0,
+        "xMm": 10.0,
+        "yMm": 116.0
+      },
+      "placementIndex": 1,
+      "slotId": "side_b"
+    }
+  ],
+  "templateId": "the-jungle-record-press-12-label-ab-106mm-2023-10",
+  "templateName": "12 in center label, A/B sheet",
+  "templateVersion": "2023-10",
+  "trimAreas": [
+    {
+      "heightMm": 101.0,
+      "shape": "circle",
+      "widthMm": 101.0,
+      "xMm": 12.5,
+      "yMm": 12.5
+    },
+    {
+      "heightMm": 101.0,
+      "shape": "circle",
+      "widthMm": 101.0,
+      "xMm": 12.5,
+      "yMm": 118.5
+    }
+  ]
+}

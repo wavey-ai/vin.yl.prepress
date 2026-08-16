@@ -524,6 +524,269 @@ pub fn effective_ppi(info: &ArtworkInfo, placement: PlantPrepressPlacement) -> f
     (f64::from(info.width_px) / width_in).min(f64::from(info.height_px) / height_in)
 }
 
+/// The files a plant-ready pack carries, in the order a plant reads them.
+pub const PACK_PROOF_PDF_NAME: &str = "proof.pdf";
+pub const PACK_PLANT_READY_PDF_NAME: &str = "plant-ready.pdf";
+pub const PACK_SPEC_JSON_NAME: &str = "record-plant-spec.json";
+pub const PACK_PREFLIGHT_MARKDOWN_NAME: &str = "preflight.md";
+pub const PACK_README_NAME: &str = "README-for-plant.md";
+
+/// Builds the pack's machine-readable spec.
+///
+/// A plant receives this alongside the PDFs, so it names every artifact in the
+/// pack and repeats the geometry the production file was built against.
+pub fn pack_spec_json(
+    template: &ExternalRecordPlantTemplateInput,
+    plan: &PlantPrepressPlan,
+    preflight: &PlantPrepressPreflightReport,
+) -> Result<String, PlantPrepressExportError> {
+    let value = serde_json::json!({
+        "packType": "bitneedle-record-plant-manufacturing-pack",
+        "templateId": plan.template_id,
+        "templateName": plan.template_name,
+        "templateVersion": plan.template_version,
+        "manufacturer": template.manufacturer,
+        "product": template.product,
+        "page": {
+            "widthMm": plan.page_width_mm,
+            "heightMm": plan.page_height_mm,
+            "widthPx": plan.page_width_px,
+            "heightPx": plan.page_height_px,
+            "targetDpi": plan.target_dpi,
+        },
+        "color": {
+            "mode": plan.color_mode,
+            "iccProfile": plan.icc_profile,
+            "outputConditionIdentifier": plan.output_condition_identifier,
+            "sourceRgbProfile": plan.source_rgb_profile,
+            "pdfStandard": plan.pdf_standard,
+        },
+        "artifacts": [
+            {
+                "path": PACK_PROOF_PDF_NAME,
+                "role": "human-proof",
+                "visibleGuides": true,
+                "containsArtwork": true,
+            },
+            {
+                "path": PACK_PLANT_READY_PDF_NAME,
+                "role": "production",
+                "visibleGuides": false,
+                "containsArtwork": true,
+            },
+            {
+                "path": PACK_SPEC_JSON_NAME,
+                "role": "machine-readable-spec",
+                "visibleGuides": false,
+            },
+            {
+                "path": PACK_PREFLIGHT_MARKDOWN_NAME,
+                "role": "human-readable-preflight",
+                "visibleGuides": false,
+            },
+            {
+                "path": PACK_README_NAME,
+                "role": "plant-instructions",
+                "visibleGuides": false,
+            },
+        ],
+        "source": template.source,
+        "sourceNotes": template.source_notes,
+        "slots": plan.slots,
+        "bleedAreas": plan.bleed_areas,
+        "trimAreas": plan.trim_areas,
+        "cutouts": plan.cutouts,
+        "safetyAreas": plan.safety_areas,
+        "preflight": preflight,
+    });
+    let json = serde_json::to_string_pretty(&value)
+        .map_err(|error| PlantPrepressExportError::new(error.to_string()))?;
+    Ok(format!("{json}\n"))
+}
+
+/// Renders the preflight report a person reads before approving the pack.
+pub fn pack_preflight_markdown(
+    plan: &PlantPrepressPlan,
+    preflight: &PlantPrepressPreflightReport,
+) -> String {
+    let mut markdown = format!(
+        "# Preflight\n\nTemplate: {}\nOutput condition: {}\nTarget: {} at {} DPI\n\n| Status | Check | Detail |\n| --- | --- | --- |\n",
+        if plan.template_name.trim().is_empty() {
+            "Selected plant template"
+        } else {
+            plan.template_name.trim()
+        },
+        plan.output_condition_identifier,
+        plan.color_mode.to_uppercase(),
+        plan.target_dpi,
+    );
+    for check in &preflight.checks {
+        let summary = if check.summary.trim().is_empty() {
+            if check.id.trim().is_empty() {
+                "Check"
+            } else {
+                check.id.trim()
+            }
+        } else {
+            check.summary.trim()
+        };
+        markdown.push_str(&format!(
+            "| {} | {} | {} |\n",
+            pack_preflight_status_label(check.status),
+            pack_markdown_cell(summary),
+            pack_markdown_cell(&check.detail),
+        ));
+    }
+    markdown
+}
+
+/// Writes the plant's instructions. The one thing it must get across is that
+/// the proof carries guides and only `plant-ready.pdf` goes on press.
+pub fn pack_readme(plan: &PlantPrepressPlan) -> String {
+    let color_mode = if plan.color_mode.trim().is_empty() {
+        "CMYK".to_string()
+    } else {
+        plan.color_mode.to_uppercase()
+    };
+    format!(
+        concat!(
+            "# README for Plant\n",
+            "\n",
+            "Production file uses `{template}` geometry.\n",
+            "\n",
+            "- Proof file: `{proof}`, visible guides and calibration marks for human approval only.\n",
+            "- Production file: `{production}`, artwork only with guide/template marks removed.\n",
+            "- Page: {width_mm} x {height_mm} mm, {width_px} x {height_px} px at {dpi} DPI.\n",
+            "- Color: {color}, output condition `{condition}`.\n",
+            "- Slots: {slots} artwork placement(s).\n",
+            "\n",
+            "Do not print the proof guide layer. Use `{production}` for production.\n",
+        ),
+        template = if plan.template_name.trim().is_empty() {
+            "selected plant template"
+        } else {
+            plan.template_name.trim()
+        },
+        proof = PACK_PROOF_PDF_NAME,
+        production = PACK_PLANT_READY_PDF_NAME,
+        width_mm = pack_fixed(plan.page_width_mm),
+        height_mm = pack_fixed(plan.page_height_mm),
+        width_px = plan.page_width_px,
+        height_px = plan.page_height_px,
+        dpi = plan.target_dpi,
+        color = color_mode,
+        condition = plan.output_condition_identifier,
+        slots = plan.slots.len(),
+    )
+}
+
+/// Packs the pack members into a store-only ZIP.
+///
+/// Store-only keeps this readable by every plant's unzip and keeps the writer
+/// small enough to share with the Apple app, which has no zip writer of its own.
+pub fn pack_zip_archive(files: &[(String, Vec<u8>)]) -> Vec<u8> {
+    let mut local_parts: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    let mut entries = 0u16;
+
+    for (name, bytes) in files {
+        let name_bytes = name.as_bytes();
+        let crc = zip_crc32(bytes);
+        let offset = local_parts.len() as u32;
+
+        local_parts.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        local_parts.extend_from_slice(&20u16.to_le_bytes());
+        local_parts.extend_from_slice(&0u16.to_le_bytes());
+        local_parts.extend_from_slice(&0u16.to_le_bytes()); // store, no compression
+        local_parts.extend_from_slice(&0u16.to_le_bytes()); // no timestamps: byte-stable output
+        local_parts.extend_from_slice(&0u16.to_le_bytes());
+        local_parts.extend_from_slice(&crc.to_le_bytes());
+        local_parts.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        local_parts.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        local_parts.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        local_parts.extend_from_slice(&0u16.to_le_bytes());
+        local_parts.extend_from_slice(name_bytes);
+        local_parts.extend_from_slice(bytes);
+
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name_bytes.len() as u16).to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u16.to_le_bytes());
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name_bytes);
+
+        entries = entries.saturating_add(1);
+    }
+
+    let central_offset = local_parts.len() as u32;
+    let central_size = central.len() as u32;
+    let mut archive = local_parts;
+    archive.extend_from_slice(&central);
+    archive.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    archive.extend_from_slice(&0u16.to_le_bytes());
+    archive.extend_from_slice(&0u16.to_le_bytes());
+    archive.extend_from_slice(&entries.to_le_bytes());
+    archive.extend_from_slice(&entries.to_le_bytes());
+    archive.extend_from_slice(&central_size.to_le_bytes());
+    archive.extend_from_slice(&central_offset.to_le_bytes());
+    archive.extend_from_slice(&0u16.to_le_bytes());
+    archive
+}
+
+fn zip_crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = (crc & 1).wrapping_neg();
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+fn pack_preflight_status_label(status: PlantPrepressPreflightStatus) -> &'static str {
+    match status {
+        PlantPrepressPreflightStatus::Pass => "pass",
+        PlantPrepressPreflightStatus::Warn => "warn",
+        PlantPrepressPreflightStatus::Fail => "fail",
+    }
+}
+
+/// Trims trailing zeros the way the shipped pack does, so 106.000 reads as 106.
+fn pack_fixed(value: f64) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
+    }
+    let text = format!("{value:.3}");
+    let trimmed = text.trim_end_matches('0').trim_end_matches('.');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Keeps a check's text inside one markdown table cell.
+fn pack_markdown_cell(value: &str) -> String {
+    value
+        .replace('|', "\\|")
+        .replace('\n', " ")
+        .replace('\r', " ")
+}
+
 fn normalized_color_mode(job: &PlantPrepressJob) -> String {
     job.target
         .color_mode
@@ -2043,13 +2306,13 @@ mod tests {
 
         assert_text_golden(
             "jungle-pack-record-plant-spec.json",
-            &pack_spec_json(&output.plan, &output.preflight),
+            &golden_pack_spec_json(&output.plan, &output.preflight),
         );
         assert_text_golden(
             "jungle-pack-preflight.md",
-            &preflight_markdown(&output.plan, &output.preflight),
+            &golden_preflight_markdown(&output.plan, &output.preflight),
         );
-        assert_text_golden("jungle-pack-readme.md", &pack_readme(&output.plan));
+        assert_text_golden("jungle-pack-readme.md", &golden_pack_readme(&output.plan));
     }
 
     #[test]
@@ -2595,10 +2858,10 @@ mod tests {
     }
 
     fn cached_supplier_template(id: &str) -> ExternalRecordPlantTemplateInput {
-        let registry: serde_json::Value = serde_json::from_str(include_str!(
-            "../../record-plant/fixtures/record-plant-registry.json"
-        ))
-        .unwrap();
+        // Read the registry through the crate that owns it. A relative path into
+        // a sibling checkout only resolves in one repository layout.
+        let registry: serde_json::Value =
+            serde_json::from_str(record_plant::REGISTRY_JSON).unwrap();
         let template = registry["templates"]
             .as_array()
             .unwrap()
@@ -2715,7 +2978,10 @@ mod tests {
         &guide_svg[start..end]
     }
 
-    fn pack_spec_json(
+    /// The pack members the committed goldens were blessed against, before the
+    /// pack builders moved to this crate's public API. The proof member here is
+    /// an SVG; the shipped pack sends a PDF.
+    fn golden_pack_spec_json(
         plan: &PlantPrepressPlan,
         preflight: &PlantPrepressPreflightReport,
     ) -> String {
@@ -2779,7 +3045,7 @@ mod tests {
         format!("{}\n", serde_json::to_string_pretty(&value).unwrap())
     }
 
-    fn preflight_markdown(
+    fn golden_preflight_markdown(
         plan: &PlantPrepressPlan,
         preflight: &PlantPrepressPreflightReport,
     ) -> String {
@@ -2801,7 +3067,7 @@ mod tests {
         markdown
     }
 
-    fn pack_readme(plan: &PlantPrepressPlan) -> String {
+    fn golden_pack_readme(plan: &PlantPrepressPlan) -> String {
         format!(
             concat!(
                 "# README for Plant\n\n",
@@ -2926,8 +3192,10 @@ mod tests {
         }
     }
 
+    /// Goldens live beside the crate so the tests pass from any checkout, not
+    /// only from the monorepo layout this crate was split out of.
     fn prepress_golden_dir() -> PathBuf {
-        repo_root().join("goldenfiles").join("prepress")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("goldenfiles")
     }
 
     fn repo_root() -> PathBuf {
@@ -2969,5 +3237,219 @@ mod tests {
             chunk.copy_from_slice(&pixel);
         }
         rgba_png(&rgba, width, height)
+    }
+
+    fn two_up_plan_and_preflight() -> (
+        PlantPrepressJob,
+        PlantPrepressPlan,
+        PlantPrepressPreflightReport,
+    ) {
+        let job = two_up_job();
+        let plan = build_prepress_plan(
+            &job,
+            &[
+                ArtworkInfo {
+                    slot_id: "side_a".to_string(),
+                    width_px: 1200,
+                    height_px: 1200,
+                },
+                ArtworkInfo {
+                    slot_id: "side_b".to_string(),
+                    width_px: 1200,
+                    height_px: 1200,
+                },
+            ],
+        )
+        .unwrap();
+        // The pack builders only read a report; assembling one takes exported
+        // PDF bytes, which these tests do not need.
+        let preflight = PlantPrepressPreflightReport {
+            checks: vec![PlantPrepressPreflightCheck {
+                id: "raster-resolution".to_string(),
+                status: PlantPrepressPreflightStatus::Pass,
+                summary: "Placed artwork meets the template raster minimum".to_string(),
+                detail: "Every slot resolves above the plant minimum.".to_string(),
+            }],
+        };
+        (job, plan, preflight)
+    }
+
+    #[test]
+    fn pack_spec_names_every_pack_member_and_its_plant() {
+        let (job, plan, preflight) = two_up_plan_and_preflight();
+        let spec: serde_json::Value =
+            serde_json::from_str(&pack_spec_json(&job.template, &plan, &preflight).unwrap())
+                .unwrap();
+
+        assert_eq!(
+            spec["packType"],
+            "bitneedle-record-plant-manufacturing-pack"
+        );
+        assert_eq!(spec["manufacturer"], "Test Plant");
+        assert_eq!(spec["product"], "7 in labels");
+        assert_eq!(spec["templateId"], plan.template_id);
+
+        let paths: Vec<&str> = spec["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|artifact| artifact["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            vec![
+                PACK_PROOF_PDF_NAME,
+                PACK_PLANT_READY_PDF_NAME,
+                PACK_SPEC_JSON_NAME,
+                PACK_PREFLIGHT_MARKDOWN_NAME,
+                PACK_README_NAME,
+            ]
+        );
+        // The production file is the one that goes on press, so it must never
+        // be described as carrying guides.
+        let production = spec["artifacts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|artifact| artifact["path"] == PACK_PLANT_READY_PDF_NAME)
+            .unwrap();
+        assert_eq!(production["visibleGuides"], false);
+        assert_eq!(spec["slots"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn pack_spec_ends_with_a_newline_for_text_diffs() {
+        let (job, plan, preflight) = two_up_plan_and_preflight();
+        let spec = pack_spec_json(&job.template, &plan, &preflight).unwrap();
+        assert!(spec.ends_with("}\n"));
+    }
+
+    #[test]
+    fn pack_preflight_markdown_keeps_each_check_on_one_row() {
+        let (_, plan, _) = two_up_plan_and_preflight();
+        let preflight = PlantPrepressPreflightReport {
+            checks: vec![PlantPrepressPreflightCheck {
+                id: "pipes".to_string(),
+                status: PlantPrepressPreflightStatus::Warn,
+                summary: "A | B".to_string(),
+                detail: "first\nsecond".to_string(),
+            }],
+        };
+        let markdown = pack_preflight_markdown(&plan, &preflight);
+        let row = markdown.lines().last().unwrap();
+        assert_eq!(row, "| warn | A \\| B | first second |");
+    }
+
+    #[test]
+    fn pack_preflight_markdown_falls_back_to_the_check_id() {
+        let (_, plan, _) = two_up_plan_and_preflight();
+        let preflight = PlantPrepressPreflightReport {
+            checks: vec![PlantPrepressPreflightCheck {
+                id: "raster-resolution".to_string(),
+                status: PlantPrepressPreflightStatus::Pass,
+                summary: "   ".to_string(),
+                detail: String::new(),
+            }],
+        };
+        assert!(pack_preflight_markdown(&plan, &preflight)
+            .contains("| pass | raster-resolution |  |"));
+    }
+
+    #[test]
+    fn pack_readme_points_the_plant_at_the_production_file() {
+        let (_, plan, _) = two_up_plan_and_preflight();
+        let readme = pack_readme(&plan);
+        assert!(readme.contains("Do not print the proof guide layer."));
+        assert!(readme.contains(&format!("Use `{PACK_PLANT_READY_PDF_NAME}` for production.")));
+        assert!(readme.contains(&format!("{} DPI", plan.target_dpi)));
+        assert!(readme.contains("- Slots: 2 artwork placement(s)."));
+    }
+
+    #[test]
+    fn pack_readme_trims_trailing_zeros_from_page_dimensions() {
+        let (_, mut plan, _) = two_up_plan_and_preflight();
+        plan.page_width_mm = 106.0;
+        plan.page_height_mm = 98.425;
+        assert!(pack_readme(&plan).contains("- Page: 106 x 98.425 mm,"));
+    }
+
+    /// Reads the archive the way an unzip tool does: seek the end-of-central
+    /// directory, walk its entries, follow each recorded offset to the local
+    /// header, and pull the stored bytes back out.
+    fn read_stored_zip(archive: &[u8]) -> Vec<(String, Vec<u8>, u32)> {
+        let u16_at = |at: usize| u16::from_le_bytes([archive[at], archive[at + 1]]) as usize;
+        let u32_at = |at: usize| {
+            u32::from_le_bytes([
+                archive[at],
+                archive[at + 1],
+                archive[at + 2],
+                archive[at + 3],
+            ])
+        };
+
+        let eocd = archive.len() - 22;
+        assert_eq!(&archive[eocd..eocd + 4], &[0x50, 0x4b, 0x05, 0x06]);
+        let entries = u16_at(eocd + 10);
+        assert_eq!(entries, u16_at(eocd + 8), "disk and total entry counts agree");
+        let mut cursor = u32_at(eocd + 16) as usize;
+
+        let mut members = Vec::with_capacity(entries);
+        for _ in 0..entries {
+            assert_eq!(&archive[cursor..cursor + 4], &[0x50, 0x4b, 0x01, 0x02]);
+            let crc = u32_at(cursor + 16);
+            let size = u32_at(cursor + 24) as usize;
+            let name_len = u16_at(cursor + 28);
+            let extra_len = u16_at(cursor + 30);
+            let comment_len = u16_at(cursor + 32);
+            let local_offset = u32_at(cursor + 42) as usize;
+            let name =
+                String::from_utf8(archive[cursor + 46..cursor + 46 + name_len].to_vec()).unwrap();
+
+            assert_eq!(
+                &archive[local_offset..local_offset + 4],
+                &[0x50, 0x4b, 0x03, 0x04],
+                "central directory offset for {name} points at a local header"
+            );
+            assert_eq!(u16_at(local_offset + 8), 0, "{name} is stored, not deflated");
+            let data_at =
+                local_offset + 30 + u16_at(local_offset + 26) + u16_at(local_offset + 28);
+            members.push((name, archive[data_at..data_at + size].to_vec(), crc));
+            cursor += 46 + name_len + extra_len + comment_len;
+        }
+        members
+    }
+
+    #[test]
+    fn pack_zip_archive_round_trips_every_member() {
+        let files = vec![
+            (PACK_README_NAME.to_string(), b"# README\n".to_vec()),
+            (PACK_SPEC_JSON_NAME.to_string(), b"{}\n".to_vec()),
+            (PACK_PLANT_READY_PDF_NAME.to_string(), vec![0u8; 4096]),
+        ];
+        let archive = pack_zip_archive(&files);
+        assert_eq!(&archive[0..4], &[0x50, 0x4b, 0x03, 0x04]);
+
+        let members = read_stored_zip(&archive);
+        assert_eq!(members.len(), files.len());
+        for ((name, bytes), (read_name, read_bytes, crc)) in files.iter().zip(members) {
+            assert_eq!(&read_name, name);
+            assert_eq!(&read_bytes, bytes);
+            assert_eq!(crc, zip_crc32(bytes), "{name} records its own CRC");
+        }
+    }
+
+    #[test]
+    fn pack_zip_archive_of_nothing_is_still_a_readable_archive() {
+        let archive = pack_zip_archive(&[]);
+        assert!(read_stored_zip(&archive).is_empty());
+    }
+
+    #[test]
+    fn pack_zip_crc_matches_the_published_check_value() {
+        // The CRC-32 of "123456789" is the standard check value for this
+        // polynomial; a wrong table or bit order fails here rather than in a
+        // plant's unzip.
+        assert_eq!(zip_crc32(b"123456789"), 0xcbf4_3926);
+        assert_eq!(zip_crc32(b""), 0);
     }
 }
