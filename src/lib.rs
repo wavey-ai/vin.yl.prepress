@@ -680,6 +680,124 @@ pub fn pack_readme(plan: &PlantPrepressPlan) -> String {
     )
 }
 
+/// Wraps a rendered proof raster in a one-page PDF at its physical size.
+///
+/// The proof is the member a person signs off, so it has to open at the real
+/// trim size in any PDF reader — a bare image carries no physical dimensions
+/// and prints at whatever the reader guesses.
+pub fn proof_pdf_from_jpeg(
+    jpeg_bytes: &[u8],
+    page_width_mm: f64,
+    page_height_mm: f64,
+    image_width: u32,
+    image_height: u32,
+    title: &str,
+) -> Result<Vec<u8>, PlantPrepressExportError> {
+    if jpeg_bytes.is_empty() {
+        return Err(PlantPrepressExportError::new(
+            "proof PDF needs rendered JPEG bytes",
+        ));
+    }
+    if image_width == 0 || image_height == 0 {
+        return Err(PlantPrepressExportError::new(
+            "proof PDF needs the raster's pixel size",
+        ));
+    }
+    if !page_width_mm.is_finite()
+        || !page_height_mm.is_finite()
+        || page_width_mm <= 0.0
+        || page_height_mm <= 0.0
+    {
+        return Err(PlantPrepressExportError::new(
+            "proof PDF needs a positive page size",
+        ));
+    }
+
+    let width_pt = page_width_mm / MM_PER_INCH * POINTS_PER_INCH;
+    let height_pt = page_height_mm / MM_PER_INCH * POINTS_PER_INCH;
+    let content = format!("q\n{width_pt:.3} 0 0 {height_pt:.3} 0 0 cm\n/Im0 Do\nQ\n");
+
+    let mut pdf: Vec<u8> = Vec::with_capacity(jpeg_bytes.len() + 1024);
+    pdf.extend_from_slice(b"%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+    let mut offsets = Vec::with_capacity(6);
+
+    let mut push = |pdf: &mut Vec<u8>, offsets: &mut Vec<usize>, text: &str| {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(text.as_bytes());
+    };
+
+    push(&mut pdf, &mut offsets, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+    push(
+        &mut pdf,
+        &mut offsets,
+        "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    );
+    push(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width_pt:.3} {height_pt:.3}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>\nendobj\n"
+        ),
+    );
+
+    offsets.push(pdf.len());
+    pdf.extend_from_slice(
+        format!(
+            "4 0 obj\n<< /Type /XObject /Subtype /Image /Width {image_width} /Height {image_height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length {} >>\nstream\n",
+            jpeg_bytes.len()
+        )
+        .as_bytes(),
+    );
+    pdf.extend_from_slice(jpeg_bytes);
+    pdf.extend_from_slice(b"\nendstream\nendobj\n");
+
+    push(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "5 0 obj\n<< /Length {} >>\nstream\n{content}endstream\nendobj\n",
+            content.len()
+        ),
+    );
+    push(
+        &mut pdf,
+        &mut offsets,
+        &format!(
+            "6 0 obj\n<< /Title ({}) /Producer (Bitneedle Plant) >>\nendobj\n",
+            escape_pdf_text(title)
+        ),
+    );
+
+    let xref_offset = pdf.len();
+    let mut xref = format!("xref\n0 {}\n0000000000 65535 f \n", offsets.len() + 1);
+    for offset in &offsets {
+        xref.push_str(&format!("{offset:010} 00000 n \n"));
+    }
+    xref.push_str(&format!(
+        "trailer\n<< /Size {} /Root 1 0 R /Info 6 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n",
+        offsets.len() + 1
+    ));
+    pdf.extend_from_slice(xref.as_bytes());
+    Ok(pdf)
+}
+
+fn escape_pdf_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' | '(' | ')' => {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            // A raw newline inside a PDF string literal ends the object.
+            '\r' | '\n' => escaped.push(' '),
+            _ if character.is_ascii() => escaped.push(character),
+            _ => escaped.push('?'),
+        }
+    }
+    escaped
+}
+
 /// Packs the pack members into a store-only ZIP.
 ///
 /// Store-only keeps this readable by every plant's unzip and keeps the writer
@@ -3442,6 +3560,40 @@ mod tests {
     fn pack_zip_archive_of_nothing_is_still_a_readable_archive() {
         let archive = pack_zip_archive(&[]);
         assert!(read_stored_zip(&archive).is_empty());
+    }
+
+    #[test]
+    fn a_proof_pdf_opens_at_the_label_size_and_carries_its_raster() {
+        let jpeg = b"\xff\xd8\xff\xe0 pretend jpeg \xff\xd9";
+        let pdf = proof_pdf_from_jpeg(jpeg, 98.4, 98.4, 1163, 1163, "Proof").unwrap();
+
+        assert!(pdf.starts_with(b"%PDF-1.4"));
+        assert!(pdf.ends_with(b"%%EOF\n"));
+        let text = String::from_utf8_lossy(&pdf);
+        // 98.4 mm is 278.929 pt; a reader that opens this at any other size
+        // would print the label at the wrong physical diameter.
+        assert!(text.contains("/MediaBox [0 0 278.929 278.929]"), "{text:.400}");
+        assert!(text.contains("/Filter /DCTDecode"));
+        assert!(text.contains("/Width 1163"));
+        assert!(text.contains("startxref"));
+        assert!(pdf
+            .windows(jpeg.len())
+            .any(|window| window == jpeg.as_slice()));
+    }
+
+    #[test]
+    fn a_proof_pdf_refuses_input_it_cannot_place() {
+        assert!(proof_pdf_from_jpeg(b"", 98.4, 98.4, 10, 10, "Proof").is_err());
+        assert!(proof_pdf_from_jpeg(b"jpeg", 98.4, 98.4, 0, 10, "Proof").is_err());
+        assert!(proof_pdf_from_jpeg(b"jpeg", 0.0, 98.4, 10, 10, "Proof").is_err());
+        assert!(proof_pdf_from_jpeg(b"jpeg", f64::NAN, 98.4, 10, 10, "Proof").is_err());
+    }
+
+    #[test]
+    fn a_proof_pdf_title_cannot_break_out_of_its_string() {
+        let pdf = proof_pdf_from_jpeg(b"jpeg", 98.4, 98.4, 10, 10, "A (weird)\\ title\nline").unwrap();
+        let text = String::from_utf8_lossy(&pdf);
+        assert!(text.contains("/Title (A \\(weird\\)\\\\ title line)"), "{text:.600}");
     }
 
     #[test]
