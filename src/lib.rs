@@ -2976,17 +2976,12 @@ mod tests {
     }
 
     fn cached_supplier_template(id: &str) -> ExternalRecordPlantTemplateInput {
-        // Read the registry through the crate that owns it. A relative path into
-        // a sibling checkout only resolves in one repository layout.
-        let registry: serde_json::Value =
-            serde_json::from_str(record_plant::REGISTRY_JSON).unwrap();
-        let template = registry["templates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|template| template["id"].as_str() == Some(id))
+        // Read the registry through the crate that owns it, so these tests
+        // exercise the same templates a plant is actually sent.
+        let template = record_plant::plant_template(id)
             .unwrap_or_else(|| panic!("missing cached supplier template {id}"));
-        serde_json::from_value(template.clone()).unwrap()
+        let json = serde_json::to_string(template).unwrap();
+        serde_json::from_str(&json).unwrap()
     }
 
     fn artwork_alignment_proof_svg(
