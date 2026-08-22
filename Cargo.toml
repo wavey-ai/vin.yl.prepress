@@ -26,12 +26,11 @@ image = { version = "0.25", default-features = false, features = [
   "webp",
 ] }
 moxcms = { version = "0.8.1", default-features = false, features = ["lut"] }
-record-plant = { git = "https://github.com/wavey-ai/vin.yl.plant.git", rev = "0d571e606fd824e8404f34b3b0028eb326738b4d" }
+record-plant = { git = "https://github.com/wavey-ai/vin.yl.plant.git", branch = "main" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Building this crate on its own picks up the sibling checkout, so the pair can
-# be developed together. A consumer that depends on this crate resolves the
-# pinned revision above instead — patches only apply to the crate being built.
+# A local build uses the sibling checkout, so the pair can be developed together.
+# Consumers resolve the main branch above. The patch applies only to this crate.
 [patch."https://github.com/wavey-ai/vin.yl.plant.git"]
 record-plant = { path = "../vin.yl.plant" }
